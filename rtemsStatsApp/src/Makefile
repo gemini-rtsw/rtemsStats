@@ -1,0 +1,31 @@
+TOP=../..
+
+include $(TOP)/configure/CONFIG
+#----------------------------------------
+#  ADD MACRO DEFINITIONS AFTER THIS LINE
+
+#=============================
+# Build a support module called <APPNAME>
+
+LIBRARY_IOC_RTEMS += rtemsStats
+
+# <APPNAME>.dbd will be created and installed
+DBD += rtemsStats.dbd
+
+# rtemsStats.dbd will be made up from these files:
+rtemsStats_DBD += base.dbd
+# List local .dbd files here
+# rtemsStats_DBD += xxx.dbd
+
+# Include dbd files for external support modules:
+# rtemsStats_DBD += genSubRecord.dbd
+
+# specify all source files to be compiled
+# including sequencer (.st) source files
+rtemsStats_SRCS += stats.c
+
+#=============================
+
+include $(TOP)/configure/RULES
+#----------------------------------------
+#  ADD RULES AFTER THIS LINE

@@ -1,0 +1,7 @@
+RTEMS_SOURCE_BASE=/gem_sw/targetOS/RTEMS/source/rtems/rtems-4.10.2
+# RELEASE_INCLUDES += -I$(RTEMS_SOURCE_BASE)/cpukit/include
+# RELEASE_INCLUDES += -I$(RTEMS_SOURCE_BASE)/cpukit/rtems/include
+# RELEASE_INCLUDES += -I$(RTEMS_SOURCE_BASE)/cpukit/score/include
+TARGET_INCLUDES += -I$(RTEMS_SOURCE_BASE)/cpukit/libmisc
+TARGET_INCLUDES += -I$(RTEMS_SOURCE_BASE)/cpukit/score/include
+# TARGET_INCLUDES_RTEMS += -I/gem_sw/targetOS/RTEMS/rtems-4.10/powerpc-rtems4.10/mvme3100/lib/include
