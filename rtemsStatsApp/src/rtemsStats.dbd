@@ -1,1 +1,3 @@
 registrar( rtemsStatsRegister )
+function(rtems_stats_export_support)
+function(rtems_stats_export_init)

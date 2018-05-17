@@ -23,6 +23,7 @@ rtemsStats_DBD += base.dbd
 # specify all source files to be compiled
 # including sequencer (.st) source files
 rtemsStats_SRCS += stats.c
+rtemsStats_SRCS += rtems_config.c
 
 #=============================
 
