@@ -44,7 +44,7 @@ typedef struct {
 
 #define INCR_RB_POINTER(x) (x = (x + 1) % MAX_EVENTS)
 typedef struct {
-	double   stamp;
+	struct timespec stamp;
 	unsigned num_events;
 	unsigned head;
 	rtems_stats_event thread_activations[MAX_EVENTS];
@@ -268,13 +268,17 @@ void rtems_stats_snapshot(void) {
 }
 
 void rtems_stats_reset_rb(rtems_stats_ring_buffer *local_rb) {
-	local_rb->stamp = 0;
+	epicsTimeStamp now;
+	epicsTimeGetCurrent(&now);
+	epicsTimeToTimespec(&local_rb->stamp, &now);
+
 	local_rb->num_events = 0;
 	local_rb->head = 0;
 }
 
 #define NEXT_ACTIVE_RB ((rb_active == &rb[0]) ? &rb[1] : &rb[0])
 #define RB_SWAP       { rtems_stats_ring_buffer *next = NEXT_ACTIVE_RB; rb_export = rb_active; rb_active = next; }
+
 #define CLEAR_NEXT_RB { rtems_stats_reset_rb(NEXT_ACTIVE_RB); }
 
 // Returns the ring buffer that was being used at the moment of being called
@@ -346,18 +350,18 @@ void rtems_stats_task_exits(rtems_tcb *task) {
 	rtems_stats_add_event(&evt);
 }
 
-#define NUM_ARGS 16
+#define NUM_ARGS 8
 
 static void rtems_stats_export_init(aSubRecord *prec) {
 	int i;
 	void **pval;
 	void **povl;
 
-	void *vala, *ovla;
+	void *val, *ovl;
 
 	for (i = 0,
-	     pval = &prec->vala,
-	     povl = &prec->ovla;
+	     pval = &prec->valf,
+	     povl = &prec->ovlf;
 	     i < NUM_ARGS;
 	     i++,
 	     pval++,
@@ -366,13 +370,12 @@ static void rtems_stats_export_init(aSubRecord *prec) {
 		free(*povl);
 	}
 
-	vala = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event), "rtems_stats_export_init -> vala");
-	ovla = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event), "rtems_stats_export_init -> povl");
-	printf("Allocated two blocks of %d * %d = %d bytes\n", MAX_EVENTS, sizeof(rtems_stats_event), MAX_EVENTS * sizeof(rtems_stats_event));
+	val = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event), "rtems_stats_export_init -> pval");
+	ovl = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event), "rtems_stats_export_init -> povl");
 
-	for (i = 0, pval = &prec->vala, povl = &prec->ovla; i < NUM_ARGS; i++, pval++, povl++) {
-		*pval = &((rtems_stats_event *)vala)[512 * i];
-		*povl = &((rtems_stats_event *)ovla)[512 * i];
+	for (i = 0, pval = &prec->valf, povl = &prec->ovlf; i < NUM_ARGS; i++, pval++, povl++) {
+		*pval = &((rtems_stats_event *)val)[512 * i];
+		*povl = &((rtems_stats_event *)ovl)[512 * i];
 	}
 }
 
@@ -385,57 +388,54 @@ static void rtems_stats_export_init(aSubRecord *prec) {
  *   EPICS outputs:
  *
  *   vala => ticks per second
- *   valb => timestamp at the beginning of the capture
- *   valc => number of events
- *   vald => index of the first event
- *   vale => array chunk #1
- *   valf => array chunk #2
- *   valg => array chunk #3
- *   valh => array chunk #4
- *   vali => array chunk #5
- *   valj => array chunk #6
- *   valk => array chunk #7
- *   vall => array chunk #8
- *   valm => array chunk #9
- *   valn => array chunk #10
- *   valo => array chunk #11
- *   valp => array chunk #12
- *   valq => array chunk #13
- *   valr => array chunk #14
- *   vals => array chunk #15
- *   valt => array chunk #16
+ *   valb => seconds at the beginning of the capture
+ *   valc => nanoseconds at the beginning of the capture
+ *   vald => number of events
+ *   vale => index of the first event
+ *   valf => array chunk #1
+ *   valg => array chunk #2
+ *   valh => array chunk #3
+ *   vali => array chunk #4
+ *   valj => array chunk #5
+ *   valk => array chunk #6
+ *   vall => array chunk #7
+ *   valm => array chunk #8
  */
 
 static long rtems_stats_export_support(aSubRecord *prec) {
-	rtems_stats_ring_buffer *rb = rtems_stats_switch_rb();
+	unsigned nevents = 0;
+	int i;
+	epicsUInt32 *nev;
 
-	if (rb == NULL) {
-		return 1;
+	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
+		rtems_stats_ring_buffer *rb = rtems_stats_switch_rb();
+
+		if (rb == NULL) {
+			errlogMessage("RTEMS STATS: Error trying to switch ring buffers");
+			return 1;
+		}
+
+		nevents = rb->num_events;
+		memset(prec->valf, 0, MAX_EVENTS * sizeof(rtems_stats_event));
+
+		memcpy(prec->valf, rb->thread_activations, MAX_EVENTS * sizeof(rtems_stats_event));
+		*(epicsUInt32 *)prec->vala = rtems_clock_get_ticks_per_second();
+		*(epicsUInt32 *)prec->valb = rb->stamp.tv_sec;
+		*(epicsUInt32 *)prec->valb = rb->stamp.tv_nsec;
+		*(epicsUInt32 *)prec->valc = nevents;
+		*(epicsUInt32 *)prec->vald = rb->head;
 	}
 
-	*(uint32_t *)prec->vala = (uint32_t)rtems_clock_get_ticks_per_second();
-	*(double *)prec->valb = rb->stamp;
-	*(uint32_t *)prec->valc = (uint32_t)rb->num_events;
-	*(uint32_t *)prec->vald = (uint32_t)rb->head;
-	// memcpy(prec->vala, rb->thread_activations, sizeof(rb->thread_activations));
-	/*
-	memcpy(prec->vale, &rb->thread_activations[  0   ], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valf, &rb->thread_activations[512   ], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valg, &rb->thread_activations[512* 2], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valh, &rb->thread_activations[512* 3], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->vali, &rb->thread_activations[512* 4], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valj, &rb->thread_activations[512* 5], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valk, &rb->thread_activations[512* 6], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->vall, &rb->thread_activations[512* 7], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valm, &rb->thread_activations[512* 8], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valn, &rb->thread_activations[512* 9], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valo, &rb->thread_activations[512*10], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valp, &rb->thread_activations[512*11], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valq, &rb->thread_activations[512*12], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valr, &rb->thread_activations[512*13], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->vals, &rb->thread_activations[512*14], sizeof(rtems_stats_event) * 512);
-	memcpy(prec->valt, &rb->thread_activations[512*15], sizeof(rtems_stats_event) * 512);
-	*/
+	for (i = 0, nev = &prec->nevf; i < NUM_ARGS; i++, nev++) {
+		if (nevents >= 512) {
+			*nev = 512;
+			nevents -= 512;
+		}
+		else {
+			*nev = nevents > 1 ? nevents : 2;
+			nevents = 0;
+		}
+	}
 
 	return 0;
 }
