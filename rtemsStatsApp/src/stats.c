@@ -24,7 +24,7 @@ static void rtems_stats_task_exits(rtems_tcb *);
 static int  rtems_stats_enabled(void);
 static int  rtems_stats_enable(void);
 static void rtems_stats_disable(void);
-static void rtems_stats_snapshot(void);
+static void rtems_stats_snapshot(int);
 
 #define MAX_EVENTS 4096
 
@@ -64,6 +64,7 @@ static rtems_extensions_table rtems_stats_extension_table = {
 };
 
 static int rtems_taking_snapshot = 0;
+static int rtems_snapshot_count = 0;
 static int rb_switch_trigger = 0;
 
 static rtems_id rtems_stats_extension_table_id;
@@ -202,9 +203,6 @@ void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 	unsigned current_event;
 	unsigned count;
 
-	errlogMessage("Displaying stats...\n");
-	errlogPrintf("Ticks per second: %lu\n", rtems_clock_get_ticks_per_second());
-	errlogPrintf("Total events: %d\n", tgt_rb->num_events);
 	for (count = 0, current_event = tgt_rb->head; count < tgt_rb->num_events; INCR_RB_POINTER(current_event), count++)
 	{
 		rtems_stats_event *ce = &tgt_rb->thread_activations[current_event];
@@ -232,15 +230,25 @@ void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 	}
 }
 
-void rtems_stats_snapshot(void) {
+void rtems_stats_snapshot(int count) {
 	rtems_stats_ring_buffer *local_rb = rb_active;
 
-	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
-		errlogMessage("rtemsStats is enabled at this time. Not taking snapshot");
+	if ((count < 0) || (count > MAX_EVENTS)) {
+		errlogPrintf("Wrong number of events. Must be: 0 <= ev < %d; with 0 = max\n", MAX_EVENTS);
 		return;
 	}
 
+	if (count == 0)
+		count = MAX_EVENTS;
+
+	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
+		errlogMessage("rtemsStats is in continuous mode. Not taking snapshot");
+		return;
+	}
+
+	printf("Taking %d events\n", count);
 	rtems_taking_snapshot = 1;
+	rtems_snapshot_count = count;
 	errlogPrintf("Size of the rtems event struct: %d\n", sizeof(rtems_stats_event));
 	rtems_stats_enable();
 	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
@@ -314,10 +322,13 @@ static void rtems_stats_add_event(rtems_stats_event *evt) {
 	if (index == rb_active->head)
 		INCR_RB_POINTER(rb_active->head);
 
-	if (rtems_taking_snapshot && (rb_active->num_events >= MAX_EVENTS)) {
-		rtems_taking_snapshot = 0;
-		RB_SWAP;
-		rtems_semaphore_release(rtems_stats_sem);
+	if (rtems_taking_snapshot) {
+		rtems_snapshot_count--;
+		if ((rb_active->num_events >= MAX_EVENTS) || (rtems_snapshot_count < 1)) {
+			rtems_taking_snapshot = 0;
+			RB_SWAP;
+			rtems_semaphore_release(rtems_stats_sem);
+		}
 	}
 }
 
@@ -471,7 +482,9 @@ static void rtemsStatsReset() {
 static const iocshFuncDef rtemsStatsReportFuncDef = {"rtemsStatsReport", 0, NULL};
 static const iocshFuncDef rtemsStatsResetFuncDef = {"rtemsStatsReset", 0, NULL};
 // New style
-static const iocshFuncDef rtemsStatsSnapFuncDef = {"rtemsStatsSnap", 0, NULL};
+static const iocshArg rtemsStatsCountArg = {"count", iocshArgInt};
+static const iocshArg *const rtemsStatsSnapArgs[] = {&rtemsStatsCountArg};
+static const iocshFuncDef rtemsStatsSnapFuncDef = {"rtemsStatsSnap", 1, rtemsStatsSnapArgs};
 static const iocshFuncDef rtemsStatsEnableFuncDef = {"rtemsStatsEnable", 0, NULL};
 static const iocshFuncDef rtemsStatsDisableFuncDef = {"rtemsStatsDisable", 0, NULL};
 
@@ -487,7 +500,7 @@ static void rtemsStatsResetCallFunc(const iocshArgBuf *args)
 
 static void rtemsStatsSnapCallFunc(const iocshArgBuf *args)
 {
-	rtems_stats_snapshot();
+	rtems_stats_snapshot(args[0].ival);
 }
 
 static void rtemsStatsEnableCallFunc(const iocshArgBuf *args)
