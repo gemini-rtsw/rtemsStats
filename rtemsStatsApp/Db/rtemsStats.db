@@ -1,10 +1,17 @@
 record(aSub, "$(IOC,undefined):rtems:stats:control") {
+    field(DESC, "RTEMS Scheduler Monitor Control")
+    field(INAM, "rtems_stats_control_init")
+    field(SNAM, "rtems_stats_control_support")
+    field(FTA,  "STRING")
+    field(FTVA, "SHORT")
+    field(FTVB, "STRING")
 }
 
 record(aSub, "$(IOC,undefined):rtems:stats:export") {
-    field(DESC, "RTEMS Scheduler Statistics Export")
+    field(DESC, "RTEMS Scheduler Monitor Export")
     field(DISV, "1")
     field(DISA, "1")
+    field(SDIS, "$(IOC,undefined):rtems:stats:control.VALA NPP NMS")
     field(EFLG, "ALWAYS")
     field(SCAN, ".2 second")
     field(INAM, "rtems_stats_export_init" )
@@ -22,6 +29,8 @@ record(aSub, "$(IOC,undefined):rtems:stats:export") {
     field(FTVK, "LONG")
     field(FTVL, "LONG")
     field(FTVM, "LONG")
+    field(FTVT, "LONG")
+    field(FTVU, "LONG")
     field(NOVF, "2560")
     field(NOVG, "2560")
     field(NOVH, "2560")

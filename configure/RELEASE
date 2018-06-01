@@ -26,9 +26,6 @@ EPICS_RELEASE=R3.14.12.7
 
 TEMPLATE_TOP=$(EPICS_BASE)/templates/makeBaseApp/top
 
-WORK_SUPP = /gem_sw/work/$(EPICS_RELEASE)/support
-PROD_SUPP = /gem_sw/prod/$(EPICS_RELEASE)/support
-
 # EPICS_BASE should appear last so earlier modules can override stuff:
 EPICS_BASE=/gem_sw/epics/$(EPICS_RELEASE)/base
 

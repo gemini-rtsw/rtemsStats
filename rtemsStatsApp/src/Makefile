@@ -13,17 +13,15 @@ LIBRARY_IOC_RTEMS += rtemsStats
 DBD += rtemsStats.dbd
 
 # rtemsStats.dbd will be made up from these files:
-rtemsStats_DBD += base.dbd
-# List local .dbd files here
-# rtemsStats_DBD += xxx.dbd
-
-# Include dbd files for external support modules:
-# rtemsStats_DBD += genSubRecord.dbd
+#rtemsStats_DBD += base.dbd
+#rtemsStats_DBD += menuScan.dbd
+#rtemsStats_DBD += genSubRecord.dbd
+rtemsStats_DBD += rtemsStatsCore.dbd
 
 # specify all source files to be compiled
 # including sequencer (.st) source files
 rtemsStats_SRCS += stats.c
-rtemsStats_SRCS += rtems_config.c
+# rtemsStats_SRCS += rtems_config.c
 
 #=============================
 

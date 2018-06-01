@@ -45,6 +45,7 @@ typedef struct {
 #define INCR_RB_POINTER(x) (x = (x + 1) % MAX_EVENTS)
 typedef struct {
 	struct timespec stamp;
+	unsigned ticks;
 	unsigned num_events;
 	unsigned head;
 	rtems_stats_event thread_activations[MAX_EVENTS];
@@ -232,7 +233,6 @@ void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 
 void rtems_stats_snapshot(int count) {
 	rtems_stats_ring_buffer *local_rb = rb_active;
-
 	if ((count < 0) || (count > MAX_EVENTS)) {
 		errlogPrintf("Wrong number of events. Must be: 0 <= ev < %d; with 0 = max\n", MAX_EVENTS);
 		return;
@@ -247,6 +247,7 @@ void rtems_stats_snapshot(int count) {
 	}
 
 	printf("Taking %d events\n", count);
+	rtems_stats_reset_rb(local_rb);
 	rtems_taking_snapshot = 1;
 	rtems_snapshot_count = count;
 	errlogPrintf("Size of the rtems event struct: %d\n", sizeof(rtems_stats_event));
@@ -277,22 +278,29 @@ void rtems_stats_snapshot(int count) {
 
 void rtems_stats_reset_rb(rtems_stats_ring_buffer *local_rb) {
 	epicsTimeStamp now;
-	epicsTimeGetCurrent(&now);
-	epicsTimeToTimespec(&local_rb->stamp, &now);
+
+	if (epicsTimeGetCurrent(&now) == epicsTimeOK) {
+		// Closest tick to the timestamp that we can get...
+		local_rb->ticks = rtems_clock_get_ticks_since_boot();
+		epicsTimeToTimespec(&local_rb->stamp, &now);
+	}
+	else {
+		errlogMessage("Can't get the time...\n");
+		local_rb->stamp.tv_sec = 0;
+		local_rb->stamp.tv_nsec = 0;
+	}
 
 	local_rb->num_events = 0;
 	local_rb->head = 0;
 }
 
 #define NEXT_ACTIVE_RB ((rb_active == &rb[0]) ? &rb[1] : &rb[0])
-#define RB_SWAP       { rtems_stats_ring_buffer *next = NEXT_ACTIVE_RB; rb_export = rb_active; rb_active = next; }
+#define RB_SWAP       { rtems_stats_ring_buffer *next = rb_export; rb_export = rb_active; rb_active = next; }
 
 #define CLEAR_NEXT_RB { rtems_stats_reset_rb(NEXT_ACTIVE_RB); }
 
 // Returns the ring buffer that was being used at the moment of being called
 rtems_stats_ring_buffer *rtems_stats_switch_rb(void) {
-	rtems_stats_ring_buffer *active = rb;
-
 	if (rtems_stats_enabled() != RTEMS_SUCCESSFUL) {
 		return NULL;
 	}
@@ -303,7 +311,7 @@ rtems_stats_ring_buffer *rtems_stats_switch_rb(void) {
 		return NULL;
 	}
 
-	return active;
+	return rb_export;
 }
 
 static void rtems_stats_add_event(rtems_stats_event *evt) {
@@ -411,44 +419,106 @@ static void rtems_stats_export_init(aSubRecord *prec) {
  *   valk => array chunk #6
  *   vall => array chunk #7
  *   valm => array chunk #8
+ *   valt => ticks at the beginning of the capture
+ *   valu => record size as multiple of LONG
  */
+
+const unsigned sizeinlongs = sizeof(rtems_stats_event) / sizeof(unsigned long);
 
 static long rtems_stats_export_support(aSubRecord *prec) {
 	unsigned nevents = 0;
 	int i;
 	epicsUInt32 *nev;
 
+	*(epicsUInt32 *)prec->vala = rtems_clock_get_ticks_per_second();
+	*(unsigned long *)prec->valu = sizeinlongs;
 	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
-		rtems_stats_ring_buffer *rb = rtems_stats_switch_rb();
+		rtems_stats_ring_buffer *export = rtems_stats_switch_rb();
 
-		if (rb == NULL) {
+		if (export == NULL) {
 			errlogMessage("RTEMS STATS: Error trying to switch ring buffers");
 			return 1;
 		}
 
-		nevents = rb->num_events;
+		nevents = export->num_events;
 		memset(prec->valf, 0, MAX_EVENTS * sizeof(rtems_stats_event));
 
-		memcpy(prec->valf, rb->thread_activations, MAX_EVENTS * sizeof(rtems_stats_event));
-		*(epicsUInt32 *)prec->vala = rtems_clock_get_ticks_per_second();
-		*(epicsUInt32 *)prec->valb = rb->stamp.tv_sec;
-		*(epicsUInt32 *)prec->valb = rb->stamp.tv_nsec;
-		*(epicsUInt32 *)prec->valc = nevents;
-		*(epicsUInt32 *)prec->vald = rb->head;
+		memcpy(prec->valf, export->thread_activations, MAX_EVENTS * sizeof(rtems_stats_event));
+		*(epicsUInt32 *)prec->valb = export->stamp.tv_sec;
+		*(epicsUInt32 *)prec->valc = export->stamp.tv_nsec;
+		*(epicsUInt32 *)prec->vale = export->head;
+		*(epicsUInt32 *)prec->valt = export->ticks;
 	}
+	*(epicsUInt32 *)prec->vald = nevents;
 
 	for (i = 0, nev = &prec->nevf; i < NUM_ARGS; i++, nev++) {
 		if (nevents >= 512) {
-			*nev = 512;
+			*nev = (512 * sizeinlongs);
 			nevents -= 512;
 		}
 		else {
-			*nev = nevents > 1 ? nevents : 2;
+			*nev = nevents > 1 ? (nevents * sizeinlongs) : 1;
 			nevents = 0;
 		}
 	}
 
 	return 0;
+}
+
+static void rtems_stats_control_init(aSubRecord *prec) {
+	*(short *)prec->vala = 1;
+	strcpy((char *)prec->valb, "UNKNOWN");
+}
+
+enum rtems_stats_control_command {
+	ENABLE,
+	DISABLE,
+	UNKNOWN
+};
+
+static long rtems_stats_control_support(aSubRecord *prec) {
+	char *cmds = (char*)prec->a;
+	char *results = "UNKNOWN";
+	enum rtems_stats_control_command cmd = UNKNOWN;
+	unsigned ret;
+
+	if (!strncmp(cmds, "ENABLE", MAX_STRING_SIZE)) {
+		cmd = ENABLE;
+	}
+	else if (!strncmp(cmds, "DISABLE", MAX_STRING_SIZE)) {
+		cmd = DISABLE;
+	}
+	else {
+		errlogMessage("rtems_stats_control_support: Received garbage\n");
+	}
+
+
+	switch (cmd) {
+		case ENABLE:
+			if (rtems_stats_enable() == RTEMS_SUCCESSFUL) {
+				rtems_stats_switch_rb();
+				*(short *)prec->vala = 0;
+				results = "ACCEPT";
+			}
+			else {
+				results = "REJECT";
+				*(short *)prec->vala = 1;
+			}
+			ret = 0;
+			break;
+		case DISABLE:
+			rtems_stats_disable();
+			*(short *)prec->vala = 1;
+			results = "ACCEPT";
+			ret = 0;
+			break;
+		default:
+			ret = 1;
+			break;
+	}
+	strcpy((char *)prec->valb, results);
+
+	return ret;
 }
 
 /*+
@@ -524,3 +594,5 @@ static void rtemsStatsRegister() {
 epicsExportRegistrar(rtemsStatsRegister);
 epicsRegisterFunction(rtems_stats_export_init);
 epicsRegisterFunction(rtems_stats_export_support);
+epicsRegisterFunction(rtems_stats_control_init);
+epicsRegisterFunction(rtems_stats_control_support);

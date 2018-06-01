@@ -23,6 +23,7 @@ DEPSCHS = $(wildcard ../*.sch)
 # simply install them into <top>/db.
 # DB += $(wildcard ../*.sym)
 
+# DB += rtemsStatsTop.db
 DB += rtemsStats.db
 
 include $(TOP)/configure/RULES
