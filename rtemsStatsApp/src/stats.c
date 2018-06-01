@@ -35,7 +35,7 @@ typedef enum {
 } rtems_stats_event_type;
 
 typedef struct {
-	rtems_stats_event_type type;
+	unsigned misc;
 	States_Control state;
 	rtems_id begin_id;
 	rtems_id end_id;
@@ -197,6 +197,11 @@ static void rtems_stats_print_state(States_Control state, int nl) {
 	free(mess);
 }
 
+#define EVENT_GET_TYPE(ev)          ((rtems_stats_event_type)(ev->misc & 0xFF))
+#define EVENT_GET_PRIO_CURRENT(ev)  ((rtems_stats_event_type)((ev->misc & 0xFF00) >> 8))
+#define EVENT_GET_PRIO_REAL(ev)     ((rtems_stats_event_type)((ev->misc & 0xFF0000) >> 16))
+#define EVENT_SET_MISC(t, c, r)     ((unsigned)(((r & 0xFF) << 16) + ((c & 0xFF) << 8) + (t & 0xFF)))
+
 void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 	unsigned current_event;
 	unsigned count;
@@ -204,7 +209,7 @@ void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 	for (count = 0, current_event = tgt_rb->head; count < tgt_rb->num_events; INCR_RB_POINTER(current_event), count++)
 	{
 		rtems_stats_event *ce = &tgt_rb->thread_activations[current_event];
-		switch(ce->type) {
+		switch(EVENT_GET_TYPE(ce)) {
 			case SWITCH:
 				errlogPrintf("S | %x | %x | %lu | ", (unsigned int)ce->end_id,
 								  (unsigned int)ce->begin_id,
@@ -339,7 +344,7 @@ static void rtems_stats_add_event(rtems_stats_event *evt) {
 
 void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *hier) {
 	rtems_stats_event evt = {
-		.type = SWITCH,
+		.misc = EVENT_SET_MISC(SWITCH, hier->current_priority, hier->real_priority),
 		.state = active->current_state,
 		.begin_id = hier->Object.id,
 		.end_id = active->Object.id
@@ -350,7 +355,7 @@ void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *hier) {
 
 void rtems_stats_task_begins(rtems_tcb *task) {
 	rtems_stats_event evt = {
-		.type = BEGIN,
+		.misc = EVENT_SET_MISC(BEGIN, task->current_priority, task->real_priority),
 		.begin_id = task->Object.id
 	};
 
@@ -359,7 +364,7 @@ void rtems_stats_task_begins(rtems_tcb *task) {
 
 void rtems_stats_task_exits(rtems_tcb *task) {
 	rtems_stats_event evt = {
-		.type = EXIT,
+		.misc = EVENT_SET_MISC(EXIT, task->current_priority, task->real_priority),
 		.end_id = task->Object.id
 	};
 

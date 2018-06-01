@@ -77,11 +77,23 @@ rtems_states_map = dict(RTEMS_STATES)
 status_masks = np.array([state.mask for state in RTEMS_STATES], dtype=np.uint32)
 
 class RtemsStatsEvent(ctypes.Structure):
-    _fields_ = [("type", ctypes.c_uint32),
+    _fields_ = [("misc", ctypes.c_uint32),
                 ("state", ctypes.c_uint32),
                 ("begin_id", ctypes.c_uint32),
                 ("end_id", ctypes.c_uint32),
                 ("ticks", ctypes.c_uint32)]
+
+    @property
+    def ev_type(self):
+        return self.misc & 0xFF
+
+    @property
+    def prio_current(self):
+        return (self.misc & 0xFF00) >> 8
+
+    @property
+    def prio_real(self):
+        return (self.misc & 0xFF0000) >> 16
 
     def status_text(self):
         bits = status_masks[status_masks & self.state != 0]
@@ -109,11 +121,13 @@ class EventPrinter(object):
             self.sub_tick = 0
 
         self.last_tick = ticks_since
-        print "{stamp}: {id_a:#08x} -> {id_b:#08x} ({state})".format(
+        print "{stamp}: {id_a:#08x} -> {id_b:#08x} {pcur:3}/{preal:03} ({state})".format(
                 id_a  = event.begin_id,
                 id_b  = event.end_id,
                 stamp = isodt(tstamp),
-                state = event.status_text()
+                state = event.status_text(),
+                pcur  = ("---" if event.prio_current == event.prio_real else event.prio_current),
+                preal = event.prio_real
                 )
 
 class Buffer(object):
