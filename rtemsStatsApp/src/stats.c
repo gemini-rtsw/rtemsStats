@@ -342,11 +342,11 @@ static void rtems_stats_add_event(rtems_stats_event *evt) {
 	}
 }
 
-void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *hier) {
+void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
 	rtems_stats_event evt = {
-		.misc = EVENT_SET_MISC(SWITCH, hier->current_priority, hier->real_priority),
+		.misc = EVENT_SET_MISC(SWITCH, heir->current_priority, heir->real_priority),
 		.state = active->current_state,
-		.begin_id = hier->Object.id,
+		.begin_id = heir->Object.id,
 		.end_id = active->Object.id
 	};
 
