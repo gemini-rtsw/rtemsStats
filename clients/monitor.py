@@ -199,14 +199,13 @@ def monitor_session(monitored):
     print "Creating the SessionTracker for PV: {0}".format(monitored)
     mon = SessionTracker(monitored, EventPrinter())
     try:
-        print "Yielding..."
         yield mon
     finally:
         mon.enable(False)
 
 def main(top):
     try:
-        with monitor_session("{top}rtems:stats".format(top=top)) as mon:
+        with monitor_session("{top}:rtems:stats".format(top=top)) as mon:
             mon.enable(True)
             while True:
                 sleep(1)
