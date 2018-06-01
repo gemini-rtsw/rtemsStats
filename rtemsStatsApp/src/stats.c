@@ -72,8 +72,6 @@ static rtems_id rtems_stats_extension_table_id;
 static rtems_name rtems_stats_table_name = rtems_build_name('R', 'T', 'S', 'T');
 static rtems_id rtems_stats_sem;
 
-static Timestamp_Control last_stamp;
-
 int rtems_stats_enabled(void) {
 	rtems_id id;
 
@@ -95,7 +93,6 @@ int rtems_stats_enable(void) {
 		return 1;
 	}
 
-	_TOD_Get_uptime(&last_stamp);
 	if ((ret = rtems_extension_create(rtems_stats_table_name,
 					 &rtems_stats_extension_table,
 					 &rtems_stats_extension_table_id)) != RTEMS_SUCCESSFUL)
