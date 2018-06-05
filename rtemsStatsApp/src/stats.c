@@ -42,8 +42,8 @@ typedef enum {
 typedef struct {
 	unsigned misc;
 	States_Control state;
-	rtems_id begin_id;
-	rtems_id end_id;
+	rtems_id obj_id;
+	rtems_id wait_id;
 	rtems_interval ticks;
 } rtems_stats_event;
 
@@ -73,6 +73,8 @@ static rtems_extensions_table rtems_stats_extension_table = {
 	.thread_begin   = rtems_stats_task_begins,
 	.thread_exitted = rtems_stats_task_exits,
 };
+
+
 
 static int rtems_taking_snapshot = 0;
 static int rtems_snapshot_count = 0;
@@ -208,6 +210,9 @@ static void rtems_stats_print_state(States_Control state, int nl) {
 }
 
 void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
+	errlogMessage("Currently not displaying stats\n");
+
+	/*
 	unsigned current_event;
 	unsigned count;
 
@@ -236,6 +241,7 @@ void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 				break;
 		}
 	}
+	*/
 }
 
 void rtems_stats_snapshot(int count) {
@@ -348,11 +354,10 @@ void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
 	rtems_stats_event evt = {
 		.misc = EVENT_SET_MISC(SWITCH, heir->current_priority, heir->real_priority),
 		.state = active->current_state,
-		.begin_id = active->Object.id,
-		.end_id = heir->Object.id
+		.obj_id  = heir->Object.id,
+		.wait_id = active->Wait.id
 	};
 
-	SET_ACTIVE_TASK(rb_active, active->Object.id);
 	SET_ACTIVE_TASK(rb_active, heir->Object.id);
 	rtems_stats_add_event(&evt);
 }
@@ -360,7 +365,7 @@ void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
 void rtems_stats_task_begins(rtems_tcb *task) {
 	rtems_stats_event evt = {
 		.misc = EVENT_SET_MISC(BEGIN, task->current_priority, task->real_priority),
-		.begin_id = task->Object.id
+		.obj_id = task->Object.id
 	};
 
 	SET_ACTIVE_TASK(rb_active, task->Object.id);
@@ -370,7 +375,7 @@ void rtems_stats_task_begins(rtems_tcb *task) {
 void rtems_stats_task_exits(rtems_tcb *task) {
 	rtems_stats_event evt = {
 		.misc = EVENT_SET_MISC(EXIT, task->current_priority, task->real_priority),
-		.end_id = task->Object.id
+		.obj_id = task->Object.id
 	};
 
 	SET_ACTIVE_TASK(rb_active, task->Object.id);

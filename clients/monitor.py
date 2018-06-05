@@ -81,8 +81,8 @@ status_masks = np.array([state.mask for state in RTEMS_STATES], dtype=np.uint32)
 class RtemsStatsEvent(ctypes.Structure):
     _fields_ = [("misc", ctypes.c_uint32),
                 ("state", ctypes.c_uint32),
-                ("begin_id", ctypes.c_uint32),
-                ("end_id", ctypes.c_uint32),
+                ("obj_id", ctypes.c_uint32),
+                ("wait_id", ctypes.c_uint32),
                 ("ticks", ctypes.c_uint32)]
 
     @property
@@ -108,6 +108,7 @@ class EventPrinter(object):
         self.tstamp_ticks = None
         self.last_tick = None
         self.sub_tick = 0
+        self.prev_id = None
 
     def set_trate(self, ticks_per_second):
         # Microseconds per tick
@@ -118,6 +119,10 @@ class EventPrinter(object):
         self.tstamp_ticks = ticks
 
     def print_ev(self, event, t_mapping):
+        if self.prev_id is None:
+            self.prev_id = event.obj_id
+            return
+
         ticks_since = event.ticks
         tstamp = self.last_timestamp + self.trate * (ticks_since - self.tstamp_ticks)
 
@@ -127,16 +132,19 @@ class EventPrinter(object):
             self.sub_tick = 0
 
         self.last_tick = ticks_since
+        st = event.status_text()
+        state = st if event.wait_id == 0 else "{0}, {1:#08x}".format(st, event.wait_id)
         print "{stamp}: {name_a:20s} -> {name_b:20s} {pcur:3}/{preal:03} ({state})".format(
-                id_a  = event.begin_id,
-                id_b  = event.end_id,
-                name_a = t_mapping.get(event.begin_id, 'UNKNOWN'),
-                name_b = t_mapping.get(event.end_id, 'UNKNOWN'),
+                id_a  = self.prev_id,
+                id_b  = event.obj_id,
+                name_a = t_mapping.get(self.prev_id, 'UNKNOWN'),
+                name_b = t_mapping.get(event.obj_id, 'UNKNOWN'),
                 stamp = isodt(tstamp),
-                state = event.status_text(),
+                state = state,
                 pcur  = ("---" if event.prio_current == event.prio_real else event.prio_current),
                 preal = event.prio_real
                 )
+        self.prev_id = event.obj_id
 
 class Buffer(object):
     def __init__(self):
