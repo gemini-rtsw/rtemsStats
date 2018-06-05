@@ -348,8 +348,8 @@ void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
 	rtems_stats_event evt = {
 		.misc = EVENT_SET_MISC(SWITCH, heir->current_priority, heir->real_priority),
 		.state = active->current_state,
-		.begin_id = heir->Object.id,
-		.end_id = active->Object.id
+		.begin_id = active->Object.id,
+		.end_id = heir->Object.id
 	};
 
 	SET_ACTIVE_TASK(rb_active, active->Object.id);
