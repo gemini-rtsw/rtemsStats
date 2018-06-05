@@ -102,12 +102,16 @@ class RtemsStatsEvent(ctypes.Structure):
         return "READY" if len(bits) == 0 else (', '.join(rtems_states_map[mask] for mask in bits))
 
 class EventPrinter(object):
-    def __init__(self, tick_rate_ms = 100): # 10000 ticks/s
-        self.trate = getdelta(tick_rate_ms)
+    def __init__(self):
+        self.trate = None
         self.last_timestamp = None
         self.tstamp_ticks = None
         self.last_tick = None
         self.sub_tick = 0
+
+    def set_trate(self, ticks_per_second):
+        # Microseconds per tick
+        self.trate = getdelta(1000000.0 / ticks_per_second)
 
     def set_timestamp(self, tstamp, ticks):
         self.last_timestamp = tstamp
@@ -155,6 +159,10 @@ class Buffer(object):
         return getdt(self.attributes['VALB'], self.attributes['VALC'])
 
     @property
+    def ticks_per_second(self):
+        return self.attributes['VALA']
+
+    @property
     def ticks_at_timestamp(self):
         return self.attributes['VALT']
 
@@ -171,6 +179,7 @@ class Buffer(object):
         copyevents = self.number_of_events
         thread_map = dict((i, n if n != 'UNKNOWN' else "{0:#08x}".format(i)) for (i, n) in zip(self.attributes['VALR'], self.attributes['VALS']))
         thread_map[0x9010001] = 'IDLE'
+        printer.set_trate(self.ticks_per_second)
         if events > 0:
             print "#events: {0}".format(events)
             # Size of each structure in bytes
