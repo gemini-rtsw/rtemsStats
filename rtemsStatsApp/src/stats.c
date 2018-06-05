@@ -34,6 +34,11 @@ typedef enum {
 	EXIT
 } rtems_stats_event_type;
 
+#define EVENT_GET_TYPE(ev)          ((rtems_stats_event_type)(ev->misc & 0xFF))
+#define EVENT_GET_PRIO_CURRENT(ev)  ((rtems_stats_event_type)((ev->misc & 0xFF00) >> 8))
+#define EVENT_GET_PRIO_REAL(ev)     ((rtems_stats_event_type)((ev->misc & 0xFF0000) >> 16))
+#define EVENT_SET_MISC(t, c, r)     ((unsigned)(((r & 0xFF) << 16) + ((c & 0xFF) << 8) + (t & 0xFF)))
+
 typedef struct {
 	unsigned misc;
 	States_Control state;
@@ -42,12 +47,17 @@ typedef struct {
 	rtems_interval ticks;
 } rtems_stats_event;
 
+#define MAX_TASKS 256
+#define ARRAY_IDS_SIZE (MAX_TASKS / 32)
+
 #define INCR_RB_POINTER(x) (x = (x + 1) % MAX_EVENTS)
+#define SET_ACTIVE_TASK(prb, tid) { if (tid != 0x9010001u) prb->ids[(tid & 0xff) / 32] |= 1 << (tid % 32);  }
 typedef struct {
 	struct timespec stamp;
 	unsigned ticks;
 	unsigned num_events;
 	unsigned head;
+	uint32_t ids[ARRAY_IDS_SIZE];
 	rtems_stats_event thread_activations[MAX_EVENTS];
 } rtems_stats_ring_buffer;
 
@@ -197,11 +207,6 @@ static void rtems_stats_print_state(States_Control state, int nl) {
 	free(mess);
 }
 
-#define EVENT_GET_TYPE(ev)          ((rtems_stats_event_type)(ev->misc & 0xFF))
-#define EVENT_GET_PRIO_CURRENT(ev)  ((rtems_stats_event_type)((ev->misc & 0xFF00) >> 8))
-#define EVENT_GET_PRIO_REAL(ev)     ((rtems_stats_event_type)((ev->misc & 0xFF0000) >> 16))
-#define EVENT_SET_MISC(t, c, r)     ((unsigned)(((r & 0xFF) << 16) + ((c & 0xFF) << 8) + (t & 0xFF)))
-
 void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 	unsigned current_event;
 	unsigned count;
@@ -281,6 +286,8 @@ void rtems_stats_snapshot(int count) {
 void rtems_stats_reset_rb(rtems_stats_ring_buffer *local_rb) {
 	epicsTimeStamp now;
 
+	memset(local_rb, 0, sizeof(rtems_stats_ring_buffer));
+
 	if (epicsTimeGetCurrent(&now) == epicsTimeOK) {
 		// Closest tick to the timestamp that we can get...
 		local_rb->ticks = rtems_clock_get_ticks_since_boot();
@@ -288,12 +295,7 @@ void rtems_stats_reset_rb(rtems_stats_ring_buffer *local_rb) {
 	}
 	else {
 		errlogMessage("Can't get the time...\n");
-		local_rb->stamp.tv_sec = 0;
-		local_rb->stamp.tv_nsec = 0;
 	}
-
-	local_rb->num_events = 0;
-	local_rb->head = 0;
 }
 
 #define NEXT_ACTIVE_RB ((rb_active == &rb[0]) ? &rb[1] : &rb[0])
@@ -350,6 +352,8 @@ void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
 		.end_id = active->Object.id
 	};
 
+	SET_ACTIVE_TASK(rb_active, active->Object.id);
+	SET_ACTIVE_TASK(rb_active, heir->Object.id);
 	rtems_stats_add_event(&evt);
 }
 
@@ -359,6 +363,7 @@ void rtems_stats_task_begins(rtems_tcb *task) {
 		.begin_id = task->Object.id
 	};
 
+	SET_ACTIVE_TASK(rb_active, task->Object.id);
 	rtems_stats_add_event(&evt);
 }
 
@@ -368,6 +373,7 @@ void rtems_stats_task_exits(rtems_tcb *task) {
 		.end_id = task->Object.id
 	};
 
+	SET_ACTIVE_TASK(rb_active, task->Object.id);
 	rtems_stats_add_event(&evt);
 }
 
@@ -421,6 +427,8 @@ static void rtems_stats_export_init(aSubRecord *prec) {
  *   valk => array chunk #6
  *   vall => array chunk #7
  *   valm => array chunk #8
+ *   valr => array: IDs for the captured tasks
+ *   vals => array: (known) names for the tasks
  *   valt => ticks at the beginning of the capture
  *   valu => record size as multiple of LONG
  */
@@ -434,8 +442,10 @@ static long rtems_stats_export_support(aSubRecord *prec) {
 
 	*(epicsUInt32 *)prec->vala = rtems_clock_get_ticks_per_second();
 	*(unsigned long *)prec->valu = sizeinlongs;
+
 	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
 		rtems_stats_ring_buffer *export = rtems_stats_switch_rb();
+		unsigned nids = 0;
 
 		if (export == NULL) {
 			errlogMessage("RTEMS STATS: Error trying to switch ring buffers");
@@ -443,14 +453,39 @@ static long rtems_stats_export_support(aSubRecord *prec) {
 		}
 
 		nevents = export->num_events;
-		memset(prec->valf, 0, MAX_EVENTS * sizeof(rtems_stats_event));
 
 		memcpy(prec->valf, export->thread_activations, MAX_EVENTS * sizeof(rtems_stats_event));
 		*(epicsUInt32 *)prec->valb = export->stamp.tv_sec;
 		*(epicsUInt32 *)prec->valc = export->stamp.tv_nsec;
 		*(epicsUInt32 *)prec->vale = export->head;
 		*(epicsUInt32 *)prec->valt = export->ticks;
+
+		for (i = 0; i < ARRAY_IDS_SIZE; i++) {
+			if (export->ids[i] != 0) {
+				int j;
+				uint32_t tidbase;
+				char tname[MAX_STRING_SIZE];
+
+				tidbase = 0xa010000 + (i * 32);
+				for (j = 0; j < 32; j++) {
+					if ((1 << j) & export->ids[i]) {
+						((epicsUInt32 *)prec->valr)[nids] = tidbase + j;
+						epicsThreadGetName((epicsThreadId)(tidbase + j), tname, MAX_STRING_SIZE);
+						if (strlen(tname) != 0)
+							strcpy(&((char *)prec->vals)[nids * MAX_STRING_SIZE], tname);
+						else
+							strcpy(&((char *)prec->vals)[nids * MAX_STRING_SIZE], "UNKNOWN");
+						nids ++;
+					}
+				}
+			}
+		}
+
+		// TODO: It's unlikely that we have an only event, but if nids would be 1, this won't do...
+		prec->nevr = nids;
+		prec->nevs = nids;
 	}
+
 	*(epicsUInt32 *)prec->vald = nevents;
 
 	for (i = 0, nev = &prec->nevf; i < NUM_ARGS; i++, nev++) {
@@ -482,7 +517,7 @@ static long rtems_stats_control_support(aSubRecord *prec) {
 	char *cmds = (char*)prec->a;
 	char *results = "UNKNOWN";
 	enum rtems_stats_control_command cmd = UNKNOWN;
-	unsigned ret;
+	unsigned ret = 1;
 
 	if (!strncmp(cmds, "ENABLE", MAX_STRING_SIZE)) {
 		cmd = ENABLE;
@@ -515,7 +550,6 @@ static long rtems_stats_control_support(aSubRecord *prec) {
 			ret = 0;
 			break;
 		default:
-			ret = 1;
 			break;
 	}
 	strcpy((char *)prec->valb, results);

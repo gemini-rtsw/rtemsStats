@@ -29,6 +29,8 @@ record(aSub, "$(IOC,undefined):rtems:stats:export") {
     field(FTVK, "LONG")
     field(FTVL, "LONG")
     field(FTVM, "LONG")
+    field(FTVR, "LONG")
+    field(FTVS, "STRING")
     field(FTVT, "LONG")
     field(FTVU, "LONG")
     field(NOVF, "2560")
@@ -39,6 +41,8 @@ record(aSub, "$(IOC,undefined):rtems:stats:export") {
     field(NOVK, "2560")
     field(NOVL, "2560")
     field(NOVM, "2560")
+    field(NOVR, "256")
+    field(NOVS, "256")
     field(NEVF, "2560")
     field(NEVG, "2560")
     field(NEVH, "2560")
@@ -47,4 +51,5 @@ record(aSub, "$(IOC,undefined):rtems:stats:export") {
     field(NEVK, "2560")
     field(NEVL, "2560")
     field(NEVM, "2560")
+    field(NEVS, "256")
 }

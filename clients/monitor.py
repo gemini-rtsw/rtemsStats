@@ -39,6 +39,8 @@ MONITORED_OUTPUTS = {
     'VALK': 'Chunk #6',
     'VALL': 'Chunk #7',
     'VALM': 'Chunk #8',
+    'VALR': 'List of IDs',
+    'VALS': 'List of names',
     'VALT': 'Ticks at the time of timestamp',
     'VALU': 'Record size (in uint32_t)'
     }
@@ -111,7 +113,7 @@ class EventPrinter(object):
         self.last_timestamp = tstamp
         self.tstamp_ticks = ticks
 
-    def print_ev(self, event):
+    def print_ev(self, event, t_mapping):
         ticks_since = event.ticks
         tstamp = self.last_timestamp + self.trate * (ticks_since - self.tstamp_ticks)
 
@@ -121,9 +123,11 @@ class EventPrinter(object):
             self.sub_tick = 0
 
         self.last_tick = ticks_since
-        print "{stamp}: {id_a:#08x} -> {id_b:#08x} {pcur:3}/{preal:03} ({state})".format(
+        print "{stamp}: {name_a:20s} -> {name_b:20s} {pcur:3}/{preal:03} ({state})".format(
                 id_a  = event.begin_id,
                 id_b  = event.end_id,
+                name_a = t_mapping.get(event.begin_id, 'UNKNOWN'),
+                name_b = t_mapping.get(event.end_id, 'UNKNOWN'),
                 stamp = isodt(tstamp),
                 state = event.status_text(),
                 pcur  = ("---" if event.prio_current == event.prio_real else event.prio_current),
@@ -165,6 +169,8 @@ class Buffer(object):
     def dump(self, printer):
         events = self.number_of_events
         copyevents = self.number_of_events
+        thread_map = dict((i, n if n != 'UNKNOWN' else "{0:#08x}".format(i)) for (i, n) in zip(self.attributes['VALR'], self.attributes['VALS']))
+        thread_map[0x9010001] = 'IDLE'
         if events > 0:
             print "#events: {0}".format(events)
             # Size of each structure in bytes
@@ -178,7 +184,7 @@ class Buffer(object):
                     break
             printer.set_timestamp(self.timestamp, self.ticks_at_timestamp)
             for n in range(copyevents):
-                printer.print_ev(data[n])
+                printer.print_ev(data[n], thread_map)
 
 class SessionTracker(object):
     def __init__(self, pvprefix, printer):
