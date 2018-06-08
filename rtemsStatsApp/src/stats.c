@@ -44,8 +44,22 @@ typedef struct {
 	States_Control state;
 	rtems_id obj_id;
 	rtems_id wait_id;
+	struct timespec stamp;
+} rtems_stats_event_with_timestamp;
+
+typedef struct {
+	unsigned misc;
+	States_Control state;
+	rtems_id obj_id;
+	rtems_id wait_id;
 	rtems_interval ticks;
-} rtems_stats_event;
+} rtems_stats_event_with_ticks;
+
+#if defined(WITH_INT_TIME)
+ #define RTEMS_STATS_EVENT rtems_stats_event_with_timestamp
+#else
+ #define RTEMS_STATS_EVENT rtems_stats_event_with_ticks
+#endif
 
 #define MAX_TASKS 256
 #define ARRAY_IDS_SIZE (MAX_TASKS / 32)
@@ -58,7 +72,7 @@ typedef struct {
 	unsigned num_events;
 	unsigned head;
 	uint32_t ids[ARRAY_IDS_SIZE];
-	rtems_stats_event thread_activations[MAX_EVENTS];
+	RTEMS_STATS_EVENT  thread_activations[MAX_EVENTS];
 } rtems_stats_ring_buffer;
 
 static rtems_stats_ring_buffer rb[2];
@@ -212,36 +226,50 @@ static void rtems_stats_print_state(States_Control state, int nl) {
 void rtems_stats_show(rtems_stats_ring_buffer *tgt_rb) {
 	errlogMessage("Currently not displaying stats\n");
 
-	/*
 	unsigned current_event;
 	unsigned count;
 
+	unsigned prev_id = 0;
+
 	for (count = 0, current_event = tgt_rb->head; count < tgt_rb->num_events; INCR_RB_POINTER(current_event), count++)
 	{
-		rtems_stats_event *ce = &tgt_rb->thread_activations[current_event];
+		RTEMS_STATS_EVENT *ce = &tgt_rb->thread_activations[current_event];
+		unsigned known = 1;
 		switch(EVENT_GET_TYPE(ce)) {
 			case SWITCH:
-				errlogPrintf("S | %x | %x | %lu | ", (unsigned int)ce->end_id,
-								  (unsigned int)ce->begin_id,
-								  ce->ticks);
-				rtems_stats_print_state(ce->state, 1);
+				if (prev_id == 0)
+					break;
+				errlogPrintf("S | %x | %x | ", (unsigned int)prev_id,
+							       (unsigned int)ce->obj_id);
 				break;
 			case BEGIN:
-				errlogPrintf("E |         | %x | %lu | ", (unsigned int)ce->begin_id,
-										ce->ticks);
-				rtems_stats_print_state(ce->state, 1);
+				errlogPrintf("E |         | %x | ", (unsigned int)ce->obj_id);
 				break;
 			case EXIT:
-				errlogPrintf("B | %x |         | %lu | ", (unsigned int)ce->end_id,
-										ce->ticks);
-				rtems_stats_print_state(ce->state, 1);
+				errlogPrintf("B | %x |         | ", (unsigned int)ce->obj_id);
 				break;
 			default:
 				errlogPrintf("U | ****\n");
+				known = 0;
 				break;
 		}
+		if (known) {
+#if defined(WITH_INT_TIME)
+			char tstamp_sec[30];
+			struct tm t;
+
+			if (gmtime_r(&(ce->stamp.tv_sec), &t) != NULL) {
+				if (strftime(tstamp_sec, sizeof(tstamp_sec), "%Y-%m-%dT%H:%M:%S", &t) > 0) {
+					errlogPrintf("%s.%09lu | ", tstamp_sec, ce->stamp.tv_nsec);
+				}
+			}
+#else
+			errlogPrintf("%lu | ", ce->ticks);
+#endif
+			rtems_stats_print_state(ce->state, 1);
+		}
+		prev_id = ce->obj_id;
 	}
-	*/
 }
 
 void rtems_stats_snapshot(int count) {
@@ -263,7 +291,6 @@ void rtems_stats_snapshot(int count) {
 	rtems_stats_reset_rb(local_rb);
 	rtems_taking_snapshot = 1;
 	rtems_snapshot_count = count;
-	errlogPrintf("Size of the rtems event struct: %d\n", sizeof(rtems_stats_event));
 	rtems_stats_enable();
 	if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
 		rtems_status_code got_lock;
@@ -289,6 +316,11 @@ void rtems_stats_snapshot(int count) {
 	}
 }
 
+static void epicsTimeToTimespecInt(struct timespec *ts, epicsTimeStamp *ets) {
+	ts->tv_sec  = (uint32_t)ets->secPastEpoch + (uint32_t)(POSIX_TIME_AT_EPICS_EPOCH);
+	ts->tv_nsec = (uint32_t)ets->nsec;
+}
+
 void rtems_stats_reset_rb(rtems_stats_ring_buffer *local_rb) {
 	epicsTimeStamp now;
 
@@ -297,7 +329,7 @@ void rtems_stats_reset_rb(rtems_stats_ring_buffer *local_rb) {
 	if (epicsTimeGetCurrent(&now) == epicsTimeOK) {
 		// Closest tick to the timestamp that we can get...
 		local_rb->ticks = rtems_clock_get_ticks_since_boot();
-		epicsTimeToTimespec(&local_rb->stamp, &now);
+		epicsTimeToTimespecInt(&local_rb->stamp, &now);
 	}
 	else {
 		errlogMessage("Can't get the time...\n");
@@ -324,8 +356,11 @@ rtems_stats_ring_buffer *rtems_stats_switch_rb(void) {
 	return rb_export;
 }
 
-static void rtems_stats_add_event(rtems_stats_event *evt) {
+static void rtems_stats_add_event(RTEMS_STATS_EVENT *evt) {
 	unsigned index;
+#if defined(WITH_INT_TIME)
+	epicsTimeStamp now;
+#endif
 
 	if (rb_switch_trigger == 1) {
 		rb_switch_trigger = 0;
@@ -333,9 +368,19 @@ static void rtems_stats_add_event(rtems_stats_event *evt) {
 		rtems_semaphore_release(rtems_stats_sem);
 	}
 
+#if defined(WITH_INT_TIME)
+	if (epicsTimeGetCurrentInt(&now) == epicsTimeOK) {
+	   epicsTimeToTimespec(&evt->stamp, &now);
+	}
+	else {
+		evt->stamp.tv_sec = 0;
+		evt->stamp.tv_nsec = 0;
+	}
+#else
 	evt->ticks = rtems_clock_get_ticks_since_boot();
+#endif
 	index = rb_active->num_events % MAX_EVENTS;
-	memcpy(&rb_active->thread_activations[index], evt, sizeof(rtems_stats_event));
+	memcpy(&rb_active->thread_activations[index], evt, sizeof(RTEMS_STATS_EVENT));
 	rb_active->num_events++;
 	if (index == rb_active->head)
 		INCR_RB_POINTER(rb_active->head);
@@ -351,7 +396,7 @@ static void rtems_stats_add_event(rtems_stats_event *evt) {
 }
 
 void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
-	rtems_stats_event evt = {
+	RTEMS_STATS_EVENT evt = {
 		.misc = EVENT_SET_MISC(SWITCH, heir->current_priority, heir->real_priority),
 		.state = active->current_state,
 		.obj_id  = heir->Object.id,
@@ -363,7 +408,7 @@ void rtems_stats_switching_context(rtems_tcb *active, rtems_tcb *heir) {
 }
 
 void rtems_stats_task_begins(rtems_tcb *task) {
-	rtems_stats_event evt = {
+	RTEMS_STATS_EVENT evt = {
 		.misc = EVENT_SET_MISC(BEGIN, task->current_priority, task->real_priority),
 		.obj_id = task->Object.id
 	};
@@ -373,7 +418,7 @@ void rtems_stats_task_begins(rtems_tcb *task) {
 }
 
 void rtems_stats_task_exits(rtems_tcb *task) {
-	rtems_stats_event evt = {
+	RTEMS_STATS_EVENT evt = {
 		.misc = EVENT_SET_MISC(EXIT, task->current_priority, task->real_priority),
 		.obj_id = task->Object.id
 	};
@@ -382,7 +427,8 @@ void rtems_stats_task_exits(rtems_tcb *task) {
 	rtems_stats_add_event(&evt);
 }
 
-#define NUM_ARGS 8
+#define NUM_CHUNKS 6
+#define MAX_LONGS_IN_CHUNK 4000
 
 static void rtems_stats_export_init(aSubRecord *prec) {
 	int i;
@@ -394,7 +440,7 @@ static void rtems_stats_export_init(aSubRecord *prec) {
 	for (i = 0,
 	     pval = &prec->valf,
 	     povl = &prec->ovlf;
-	     i < NUM_ARGS;
+	     i < NUM_CHUNKS;
 	     i++,
 	     pval++,
 	     povl++) {
@@ -402,12 +448,13 @@ static void rtems_stats_export_init(aSubRecord *prec) {
 		free(*povl);
 	}
 
-	val = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event), "rtems_stats_export_init -> pval");
-	ovl = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event), "rtems_stats_export_init -> povl");
+	// We allocate taking into account the largest of the two, to match the DB definition
+	val = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event_with_timestamp), "rtems_stats_export_init -> pval");
+	ovl = callocMustSucceed(MAX_EVENTS, sizeof(rtems_stats_event_with_timestamp), "rtems_stats_export_init -> povl");
 
-	for (i = 0, pval = &prec->valf, povl = &prec->ovlf; i < NUM_ARGS; i++, pval++, povl++) {
-		*pval = &((rtems_stats_event *)val)[512 * i];
-		*povl = &((rtems_stats_event *)ovl)[512 * i];
+	for (i = 0, pval = &prec->valf, povl = &prec->ovlf; i < NUM_CHUNKS; i++, pval++, povl++) {
+		*pval = &((uint32_t *)val)[MAX_LONGS_IN_CHUNK * i];
+		*povl = &((uint32_t *)ovl)[MAX_LONGS_IN_CHUNK * i];
 	}
 }
 
@@ -431,17 +478,17 @@ static void rtems_stats_export_init(aSubRecord *prec) {
  *   valj => array chunk #5
  *   valk => array chunk #6
  *   vall => array chunk #7
- *   valm => array chunk #8
  *   valr => array: IDs for the captured tasks
  *   vals => array: (known) names for the tasks
  *   valt => ticks at the beginning of the capture
  *   valu => record size as multiple of LONG
  */
 
-const unsigned sizeinlongs = sizeof(rtems_stats_event) / sizeof(unsigned long);
+const unsigned sizeinlongs = sizeof(RTEMS_STATS_EVENT) / sizeof(unsigned long);
 
 static long rtems_stats_export_support(aSubRecord *prec) {
 	unsigned nevents = 0;
+	unsigned total_longs = 0;
 	int i;
 	epicsUInt32 *nev;
 
@@ -459,7 +506,7 @@ static long rtems_stats_export_support(aSubRecord *prec) {
 
 		nevents = export->num_events;
 
-		memcpy(prec->valf, export->thread_activations, MAX_EVENTS * sizeof(rtems_stats_event));
+		memcpy(prec->valf, export->thread_activations, MAX_EVENTS * sizeof(RTEMS_STATS_EVENT));
 		*(epicsUInt32 *)prec->valb = export->stamp.tv_sec;
 		*(epicsUInt32 *)prec->valc = export->stamp.tv_nsec;
 		*(epicsUInt32 *)prec->vale = export->head;
@@ -492,15 +539,16 @@ static long rtems_stats_export_support(aSubRecord *prec) {
 	}
 
 	*(epicsUInt32 *)prec->vald = nevents;
+	total_longs = nevents * sizeinlongs;
 
-	for (i = 0, nev = &prec->nevf; i < NUM_ARGS; i++, nev++) {
-		if (nevents >= 512) {
-			*nev = (512 * sizeinlongs);
-			nevents -= 512;
+	for (i = 0, nev = &prec->nevf; i < NUM_CHUNKS; i++, nev++) {
+		if (total_longs >= MAX_LONGS_IN_CHUNK) {
+			*nev = MAX_LONGS_IN_CHUNK;
+			total_longs -= MAX_LONGS_IN_CHUNK;
 		}
 		else {
-			*nev = nevents > 1 ? (nevents * sizeinlongs) : 1;
-			nevents = 0;
+			*nev = total_longs > 0 ? total_longs : 1;
+			total_longs = 0;
 		}
 	}
 
@@ -513,18 +561,27 @@ static void rtems_stats_control_init(aSubRecord *prec) {
 }
 
 enum rtems_stats_control_command {
+	INFO,
 	ENABLE,
 	DISABLE,
 	UNKNOWN
 };
+
+#define RTEMS_STATS_PRECISE_TIMING 0x01
+#define RTEMS_STATS_IS_ENABLED     0x02
 
 static long rtems_stats_control_support(aSubRecord *prec) {
 	char *cmds = (char*)prec->a;
 	char *results = "UNKNOWN";
 	enum rtems_stats_control_command cmd = UNKNOWN;
 	unsigned ret = 1;
+	unsigned short *vala = (unsigned short *)prec->vala;
+	unsigned *valc = (unsigned *)prec->valc;
 
-	if (!strncmp(cmds, "ENABLE", MAX_STRING_SIZE)) {
+	if (!strncmp(cmds, "INFO", MAX_STRING_SIZE)) {
+		cmd = INFO;
+	}
+	else if (!strncmp(cmds, "ENABLE", MAX_STRING_SIZE)) {
 		cmd = ENABLE;
 	}
 	else if (!strncmp(cmds, "DISABLE", MAX_STRING_SIZE)) {
@@ -536,21 +593,33 @@ static long rtems_stats_control_support(aSubRecord *prec) {
 
 
 	switch (cmd) {
+		case INFO:
+			results = "ACCEPT";
+
+			*valc = 0;
+#if defined(WITH_INT_TIME)
+			*valc |= RTEMS_STATS_PRECISE_TIMING;
+#endif
+			if (rtems_stats_enabled() == RTEMS_SUCCESSFUL) {
+				*valc |= RTEMS_STATS_IS_ENABLED;
+			}
+			ret = 0;
+			break;
 		case ENABLE:
 			if (rtems_stats_enable() == RTEMS_SUCCESSFUL) {
 				rtems_stats_switch_rb();
-				*(short *)prec->vala = 0;
+				*vala = 0;
 				results = "ACCEPT";
 			}
 			else {
 				results = "REJECT";
-				*(short *)prec->vala = 1;
+				*vala = 1;
 			}
 			ret = 0;
 			break;
 		case DISABLE:
 			rtems_stats_disable();
-			*(short *)prec->vala = 1;
+			*vala = 1;
 			results = "ACCEPT";
 			ret = 0;
 			break;

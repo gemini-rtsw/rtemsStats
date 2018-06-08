@@ -1,0 +1,9 @@
+# By default we're conservative and approximate the timing using system ticks.
+# The granularity is typically not good enough for precise timing, but it may
+# be good enough for your use case.
+#
+# If your EPICS setup includes a time service that defines hooks for
+# epicsTimeGetCurrentInt, though, feel free to uncomment the following please,
+# to get more precise timing
+
+# USR_CFLAGS = -DWITH_INT_TIME
