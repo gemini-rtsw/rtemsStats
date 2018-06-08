@@ -12,8 +12,6 @@
 
 #include <rtems.h>
 #include <rtems/extension.h>
-#include <capture/capture.h>
-#include <cpuuse/cpuuse.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -631,52 +629,11 @@ static long rtems_stats_control_support(aSubRecord *prec) {
 	return ret;
 }
 
-/*+
- *   Function name:
- *   rtemsStatsReport
- *
- *   Purpose:
- *   Report on statistics related to RTEMS task execution
- *
- *-
- */
-
-static void rtemsStatsReport() {
-	rtems_cpu_usage_report();
-}
-
-
-/*+
- *   Function name:
- *   rtemsStatsReset
- *
- *   Purpose:
- *   Reset RTEMS statistics
- *
- *-
- */
-static void rtemsStatsReset() {
-	rtems_cpu_usage_reset();
-}
-
-static const iocshFuncDef rtemsStatsReportFuncDef = {"rtemsStatsReport", 0, NULL};
-static const iocshFuncDef rtemsStatsResetFuncDef = {"rtemsStatsReset", 0, NULL};
-// New style
 static const iocshArg rtemsStatsCountArg = {"count", iocshArgInt};
 static const iocshArg *const rtemsStatsSnapArgs[] = {&rtemsStatsCountArg};
 static const iocshFuncDef rtemsStatsSnapFuncDef = {"rtemsStatsSnap", 1, rtemsStatsSnapArgs};
 static const iocshFuncDef rtemsStatsEnableFuncDef = {"rtemsStatsEnable", 0, NULL};
 static const iocshFuncDef rtemsStatsDisableFuncDef = {"rtemsStatsDisable", 0, NULL};
-
-static void rtemsStatsReportCallFunc(const iocshArgBuf *args)
-{
-	rtemsStatsReport();
-}
-
-static void rtemsStatsResetCallFunc(const iocshArgBuf *args)
-{
-	rtemsStatsReset();
-}
 
 static void rtemsStatsSnapCallFunc(const iocshArgBuf *args)
 {
@@ -694,8 +651,6 @@ static void rtemsStatsDisableCallFunc(const iocshArgBuf *args)
 }
 
 static void rtemsStatsRegister() {
-	iocshRegister(&rtemsStatsReportFuncDef, rtemsStatsReportCallFunc);
-	iocshRegister(&rtemsStatsResetFuncDef, rtemsStatsResetCallFunc);
 	iocshRegister(&rtemsStatsSnapFuncDef, rtemsStatsSnapCallFunc);
 	iocshRegister(&rtemsStatsEnableFuncDef, rtemsStatsEnableCallFunc);
 	iocshRegister(&rtemsStatsDisableFuncDef, rtemsStatsDisableCallFunc);
