@@ -14,12 +14,15 @@ from time import sleep
 import epics
 from epics import PV
 import numpy as np
+from datetime import datetime, timedelta
 try:
-    from numpy import datetime64, timedelta64
     def getdt(sec, nsec):
-        return np.datetime64('{0}.{1}'.format(sec, nsec), 'ns')
+        return np.datetime64(datetime.utcfromtimestamp(sec), 'ns') + np.timedelta64(nsec, 'ns')
+    def getdelta(mdelta):
+        return np.timedelta64(mdelta, 'ms')
+    def isodt(dt):
+        return str(dt)
 except ImportError:
-    from datetime import datetime, timedelta
     def getdt(sec, nsec):
         return datetime.utcfromtimestamp(sec + nsec / 1000000000.)
     def getdelta(mdelta):
