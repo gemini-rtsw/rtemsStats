@@ -16,10 +16,11 @@ from epics import PV
 import numpy as np
 from datetime import datetime, timedelta
 try:
+    from numpy import datetime64, timedelta64
     def getdt(sec, nsec):
-        return np.datetime64(datetime.utcfromtimestamp(sec), 'ns') + np.timedelta64(nsec, 'ns')
+        return datetime64(datetime.utcfromtimestamp(sec), 'ns') + timedelta64(nsec, 'ns')
     def getdelta(mdelta):
-        return np.timedelta64(mdelta, 'ms')
+        return timedelta64(mdelta, 'ms')
     def isodt(dt):
         return str(dt)
 except ImportError:
